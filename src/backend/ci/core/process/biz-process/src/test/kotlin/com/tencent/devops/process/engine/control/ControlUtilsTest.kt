@@ -335,9 +335,9 @@ class ControlUtilsTest {
         Assert.assertFalse(
             ControlUtils.checkAdditionalSkip(buildId = buildId,
                 additionalOptions = null,
-                containerFinalStatus = BuildStatus.RUNNING,
+                currentStatus = BuildStatus.RUNNING,
                 variables = variables,
-                hasFailedTaskInSuccessContainer = true)
+                continueWhenFailure = true)
         )
 
         // 不适用的 RunCondition 条件
@@ -345,51 +345,79 @@ class ControlUtilsTest {
             Assert.assertFalse(
                 ControlUtils.checkAdditionalSkip(buildId = buildId,
                     additionalOptions = elementAdditionalOptions(runCondition = RunCondition.PRE_TASK_SUCCESS),
-                    containerFinalStatus = BuildStatus.RUNNING,
+                    currentStatus = BuildStatus.RUNNING,
                     variables = variables,
-                    hasFailedTaskInSuccessContainer = true)
+                    continueWhenFailure = true)
+            )
+            Assert.assertFalse(
+                ControlUtils.checkAdditionalSkip(buildId = buildId,
+                    additionalOptions = elementAdditionalOptions(runCondition = RunCondition.PRE_TASK_SUCCESS),
+                    currentStatus = BuildStatus.SUCCEED,
+                    variables = variables,
+                    continueWhenFailure = true) // 失败继续 此项不影响结果
+            )
+            Assert.assertFalse(
+                ControlUtils.checkAdditionalSkip(buildId = buildId,
+                    additionalOptions = elementAdditionalOptions(runCondition = RunCondition.PRE_TASK_SUCCESS),
+                    currentStatus = BuildStatus.SUCCEED,
+                    variables = variables,
+                    continueWhenFailure = false) // 失败继续 此项不影响结果
+            )
+            Assert.assertTrue(
+                ControlUtils.checkAdditionalSkip(buildId = buildId,
+                    additionalOptions = elementAdditionalOptions(runCondition = RunCondition.PRE_TASK_SUCCESS),
+                    currentStatus = BuildStatus.FAILED,
+                    variables = variables,
+                    continueWhenFailure = false) // 失败继续 此项不影响结果
+            )
+            Assert.assertTrue(
+                ControlUtils.checkAdditionalSkip(buildId = buildId,
+                    additionalOptions = elementAdditionalOptions(runCondition = RunCondition.PRE_TASK_SUCCESS),
+                    currentStatus = BuildStatus.FAILED,
+                    variables = variables,
+                    continueWhenFailure = true) // 失败继续 此项不影响结果
             )
             Assert.assertFalse(
                 ControlUtils.checkAdditionalSkip(buildId = buildId,
                     additionalOptions = elementAdditionalOptions(runCondition = RunCondition.CUSTOM_CONDITION_MATCH),
-                    containerFinalStatus = BuildStatus.RUNNING,
+                    currentStatus = BuildStatus.RUNNING,
                     variables = variables,
-                    hasFailedTaskInSuccessContainer = true)
+                    continueWhenFailure = true)
             )
             Assert.assertFalse(
                 ControlUtils.checkAdditionalSkip(buildId = buildId,
                     additionalOptions = elementAdditionalOptions(runCondition = RunCondition.CUSTOM_VARIABLE_MATCH),
-                    containerFinalStatus = BuildStatus.RUNNING,
+                    currentStatus = BuildStatus.RUNNING,
                     variables = variables,
-                    hasFailedTaskInSuccessContainer = true)
+                    continueWhenFailure = true)
             )
             Assert.assertFalse(
                 ControlUtils.checkAdditionalSkip(buildId = buildId,
                     additionalOptions = elementAdditionalOptions(runCondition = RunCondition.CUSTOM_VARIABLE_MATCH_NOT_RUN),
-                    containerFinalStatus = BuildStatus.RUNNING,
+                    currentStatus = BuildStatus.RUNNING,
                     variables = variables,
-                    hasFailedTaskInSuccessContainer = true)
+                    continueWhenFailure = true)
             )
             Assert.assertFalse(
                 ControlUtils.checkAdditionalSkip(buildId = buildId,
                     additionalOptions = elementAdditionalOptions(runCondition = RunCondition.PRE_TASK_FAILED_BUT_CANCEL),
-                    containerFinalStatus = BuildStatus.RUNNING,
+                    currentStatus = BuildStatus.RUNNING,
                     variables = variables,
-                    hasFailedTaskInSuccessContainer = true)
+                    continueWhenFailure = true)
             )
             Assert.assertFalse(
                 ControlUtils.checkAdditionalSkip(buildId = buildId,
                     additionalOptions = elementAdditionalOptions(runCondition = RunCondition.PRE_TASK_FAILED_EVEN_CANCEL),
-                    containerFinalStatus = BuildStatus.RUNNING,
+                    currentStatus = BuildStatus.RUNNING,
                     variables = variables,
-                    hasFailedTaskInSuccessContainer = true)
+                    continueWhenFailure = true)
             )
             Assert.assertFalse(
                 ControlUtils.checkAdditionalSkip(buildId = buildId,
                     additionalOptions = elementAdditionalOptions(runCondition = RunCondition.OTHER_TASK_RUNNING),
-                    containerFinalStatus = BuildStatus.RUNNING,
+                    currentStatus = BuildStatus.RUNNING,
                     variables = variables,
-                    hasFailedTaskInSuccessContainer = true)
+                    continueWhenFailure = true)
             )
         }
 
@@ -397,43 +425,43 @@ class ControlUtilsTest {
         Assert.assertFalse(
             ControlUtils.checkAdditionalSkip(buildId = buildId,
                 additionalOptions = elementAdditionalOptions(enable = true, runCondition = RunCondition.PRE_TASK_FAILED_ONLY),
-                containerFinalStatus = BuildStatus.RUNNING,
+                currentStatus = BuildStatus.RUNNING,
                 variables = variables,
-                hasFailedTaskInSuccessContainer = true)
+                continueWhenFailure = true)
         )
         // RunCondition.PRE_TASK_FAILED_ONLY & FAIL
         Assert.assertFalse(
             ControlUtils.checkAdditionalSkip(buildId = buildId,
                 additionalOptions = elementAdditionalOptions(enable = true, runCondition = RunCondition.PRE_TASK_FAILED_ONLY),
-                containerFinalStatus = BuildStatus.FAILED,
+                currentStatus = BuildStatus.FAILED,
                 variables = variables,
-                hasFailedTaskInSuccessContainer = true)
+                continueWhenFailure = true)
         )
         // RunCondition.PRE_TASK_FAILED_ONLY & FAIL
         Assert.assertFalse(
             ControlUtils.checkAdditionalSkip(buildId = buildId,
                 additionalOptions = elementAdditionalOptions(enable = true, runCondition = RunCondition.PRE_TASK_FAILED_ONLY),
-                containerFinalStatus = BuildStatus.FAILED,
+                currentStatus = BuildStatus.FAILED,
                 variables = variables,
-                hasFailedTaskInSuccessContainer = false)
+                continueWhenFailure = false)
         )
 
         // RunCondition.PRE_TASK_FAILED_ONLY & disable
         Assert.assertTrue(
             ControlUtils.checkAdditionalSkip(buildId = buildId,
                 additionalOptions = elementAdditionalOptions(enable = false, runCondition = RunCondition.PRE_TASK_FAILED_ONLY),
-                containerFinalStatus = BuildStatus.FAILED,
+                currentStatus = BuildStatus.FAILED,
                 variables = variables,
-                hasFailedTaskInSuccessContainer = false)
+                continueWhenFailure = false)
         )
 
         // RunCondition.PRE_TASK_FAILED_ONLY & SUCCEED
         Assert.assertTrue(
             ControlUtils.checkAdditionalSkip(buildId = buildId,
                 additionalOptions = elementAdditionalOptions(enable = true, runCondition = RunCondition.PRE_TASK_FAILED_ONLY),
-                containerFinalStatus = BuildStatus.SUCCEED,
+                currentStatus = BuildStatus.SUCCEED,
                 variables = variables,
-                hasFailedTaskInSuccessContainer = false)
+                continueWhenFailure = false)
         )
     }
 

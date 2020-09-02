@@ -91,13 +91,13 @@ object ControlUtils {
     fun checkAdditionalSkip(
         buildId: String,
         additionalOptions: ElementAdditionalOptions?,
-        containerFinalStatus: BuildStatus,
+        currentStatus: BuildStatus,
         variables: Map<String, String>,
-        hasFailedTaskInSuccessContainer: Boolean
+        continueWhenFailure: Boolean
     ): Boolean {
-        // 如果当前插件是只有失败才运行，而截止当前整个container是成功的，并且没有失败插件，则直接跳过
-        if (skipWhenPreTaskFailedOnly(additionalOptions, containerFinalStatus, hasFailedTaskInSuccessContainer)) {
-            logger.info("buildId=[$buildId]|PRE_TASK_FAILED_ONLY|containerFinalStatus=$containerFinalStatus|will skip")
+        // #2375 检查控制流程的执行条件
+        if (skipByRunCondition(additionalOptions?.runCondition, currentStatus, continueWhenFailure)) {
+            logger.info("[$buildId]|skipCheckRunCondition|condition=${additionalOptions?.runCondition}|continueWhenFailure=$continueWhenFailure|status=$currentStatus|will skip")
             return true
         }
         if (!isEnable(additionalOptions)) {
@@ -147,15 +147,14 @@ object ControlUtils {
         additionalOptions != null && additionalOptions.runCondition == RunCondition.CUSTOM_VARIABLE_MATCH_NOT_RUN &&
             additionalOptions.customVariables != null && additionalOptions.customVariables!!.isNotEmpty()
 
-    private fun skipWhenPreTaskFailedOnly(
-        additionalOptions: ElementAdditionalOptions?,
-        containerFinalStatus: BuildStatus,
-        hasFailedTaskInSuccessContainer: Boolean
-    ): Boolean {
-        return additionalOptions != null &&
-            additionalOptions.runCondition == RunCondition.PRE_TASK_FAILED_ONLY &&
-            BuildStatus.isSuccess(containerFinalStatus) &&
-            !hasFailedTaskInSuccessContainer
+    private fun skipByRunCondition(runCondition: RunCondition?, currentStatus: BuildStatus, continueWhenFailure: Boolean): Boolean {
+        return when (runCondition) {
+            // #2375 跳过: 只有前面有插件运行失败时才运行 -> 要满足前面没有失败的任务并且没有失败并继续的任务 才会跳过
+            RunCondition.PRE_TASK_FAILED_ONLY -> currentStatus.isSuccess() && !continueWhenFailure
+            // #2375 跳过: 所有前置插件运行成功时才运行 -> 要满足前面有失败的任务 才会跳过
+            RunCondition.PRE_TASK_SUCCESS -> currentStatus.isFailure()
+            else -> false
+        }
     }
 
     fun checkJobSkipCondition(
