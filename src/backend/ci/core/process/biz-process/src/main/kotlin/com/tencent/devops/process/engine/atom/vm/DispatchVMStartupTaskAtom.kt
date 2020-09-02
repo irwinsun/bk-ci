@@ -62,6 +62,7 @@ import com.tencent.devops.process.engine.service.PipelineBuildDetailService
 import com.tencent.devops.process.engine.service.PipelineRepositoryService
 import com.tencent.devops.process.engine.service.PipelineRuntimeService
 import com.tencent.devops.common.api.pojo.ErrorType
+import com.tencent.devops.common.pipeline.pojo.element.RunCondition
 import com.tencent.devops.process.engine.atom.defaultFailAtomResponse
 import com.tencent.devops.process.pojo.mq.PipelineAgentShutdownEvent
 import com.tencent.devops.process.pojo.mq.PipelineAgentStartupEvent
@@ -431,9 +432,9 @@ class DispatchVMStartupTaskAtom @Autowired constructor(
             buildId: String,
             stageId: String,
             container: Container,
-            containerSeq: Int,
             taskSeq: Int,
-            userId: String
+            userId: String,
+            startVMTaskRunCondition: RunCondition
         ): PipelineBuildTask {
 
             val taskParams = container.genTaskParams()
@@ -457,7 +458,7 @@ class DispatchVMStartupTaskAtom @Autowired constructor(
                 starter = userId,
                 approver = null,
                 subBuildId = null,
-                additionalOptions = null
+                additionalOptions = VMUtils.genVMTaskOptions(runCondition = startVMTaskRunCondition)
             )
         }
     }

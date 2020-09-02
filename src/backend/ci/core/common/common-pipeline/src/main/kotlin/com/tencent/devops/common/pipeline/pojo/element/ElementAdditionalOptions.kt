@@ -51,4 +51,25 @@ enum class RunCondition {
     CUSTOM_VARIABLE_MATCH_NOT_RUN,     // 自定义变量全部满足时不运行
     CUSTOM_CONDITION_MATCH             // 满足以下自定义条件时运行
     ;
+
+    /**
+     * 设置运行条件的优先级，数值越大优先级越高
+     */
+    fun priority(): Int {
+        return when (this) {
+            CUSTOM_VARIABLE_MATCH -> 1
+            CUSTOM_CONDITION_MATCH -> 2
+            OTHER_TASK_RUNNING -> 3
+            CUSTOM_VARIABLE_MATCH_NOT_RUN -> 4
+
+            PRE_TASK_SUCCESS -> 90
+            PRE_TASK_FAILED_ONLY -> 91
+            PRE_TASK_FAILED_BUT_CANCEL -> 92
+            PRE_TASK_FAILED_EVEN_CANCEL -> 93
+        }
+    }
+
+    fun runWhenFail() = this == PRE_TASK_FAILED_ONLY || runAnyway()
+
+    fun runAnyway() = this == PRE_TASK_FAILED_EVEN_CANCEL || this == PRE_TASK_FAILED_BUT_CANCEL
 }

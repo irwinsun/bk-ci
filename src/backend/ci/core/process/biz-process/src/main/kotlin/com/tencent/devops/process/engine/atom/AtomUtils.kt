@@ -26,15 +26,16 @@
 
 package com.tencent.devops.process.engine.atom
 
+import com.tencent.devops.common.api.pojo.ErrorType
 import com.tencent.devops.common.client.Client
+import com.tencent.devops.common.log.utils.BuildLogPrinter
 import com.tencent.devops.common.pipeline.container.Container
 import com.tencent.devops.common.pipeline.pojo.element.market.MarketBuildAtomElement
 import com.tencent.devops.common.pipeline.pojo.element.market.MarketBuildLessAtomElement
-import com.tencent.devops.common.log.utils.BuildLogPrinter
+import com.tencent.devops.common.service.utils.SpringContextUtil
 import com.tencent.devops.process.constant.ProcessMessageCode.ERROR_ATOM_NOT_FOUND
 import com.tencent.devops.process.engine.exception.BuildTaskException
 import com.tencent.devops.process.engine.pojo.PipelineBuildTask
-import com.tencent.devops.common.api.pojo.ErrorType
 import com.tencent.devops.store.api.atom.ServiceMarketAtomEnvResource
 
 object AtomUtils {
@@ -87,4 +88,8 @@ object AtomUtils {
         }
         return atoms
     }
+
+    fun taskAtom(taskAtom: String) =
+        if (taskAtom.isBlank()) SpringContextUtil.getBean(DummyTaskAtom::class.java)
+        else SpringContextUtil.getBean(IAtomTask::class.java, taskAtom)
 }

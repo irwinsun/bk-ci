@@ -26,11 +26,23 @@
 
 package com.tencent.devops.process.engine.common
 
+import com.tencent.devops.common.pipeline.NameAndValue
+import com.tencent.devops.common.pipeline.pojo.element.ElementAdditionalOptions
+import com.tencent.devops.common.pipeline.pojo.element.RunCondition
+
 /**
  *
  * @version 1.0
  */
 object VMUtils {
+
+    enum class VMStatus {
+        INIT,
+        START_FAILED,
+        ONLINE,
+        HEART_BEAT_TIME_OUT,
+        OFFLINE
+    }
 
     fun genStageId(seq: Int) = "stage-$seq"
 
@@ -41,4 +53,20 @@ object VMUtils {
     fun genVMSeq(containerSeq: Int, taskSeq: Int): Int = containerSeq * 1000 + taskSeq
 
     fun genStartVMTaskId(containerSeq: String) = "startVM-$containerSeq"
+
+    fun genVMTaskOptions(runCondition: RunCondition, customVariables: List<NameAndValue> = emptyList()): ElementAdditionalOptions = ElementAdditionalOptions(
+        enable = true,
+        continueWhenFailed = false,
+        retryWhenFailed = true,
+        retryCount = 1, // retry 1 time
+        timeout = 10, // minute
+        runCondition = runCondition,
+        customVariables = customVariables,
+        otherTask = null,
+        customCondition = null
+    )
+
+    fun genVMStatusFlag(vmSeqId: String) = "vm_${vmSeqId}_status"
+
+    fun isVMOnlineStatus(onlineStatusFlag: String?) = onlineStatusFlag == VMStatus.ONLINE.name
 }

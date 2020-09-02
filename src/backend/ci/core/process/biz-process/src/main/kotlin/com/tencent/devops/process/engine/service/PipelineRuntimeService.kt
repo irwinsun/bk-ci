@@ -48,6 +48,7 @@ import com.tencent.devops.common.pipeline.enums.StartType
 import com.tencent.devops.common.pipeline.option.StageControlOption
 import com.tencent.devops.common.pipeline.pojo.BuildParameters
 import com.tencent.devops.common.pipeline.pojo.element.Element
+import com.tencent.devops.common.pipeline.pojo.element.RunCondition
 import com.tencent.devops.common.pipeline.pojo.element.agent.ManualReviewUserTaskElement
 import com.tencent.devops.common.pipeline.pojo.element.market.MarketBuildAtomElement
 import com.tencent.devops.common.pipeline.pojo.element.market.MarketBuildLessAtomElement
@@ -782,7 +783,6 @@ class PipelineRuntimeService @Autowired constructor(
             // --- 第2层循环：Container遍历处理 ---
             stage.containers.forEach nextContainer@{ container ->
                 var startVMTaskSeq = -1 // 启动构建机位置，解决如果在执行人工审核插件时，无编译环境不需要提前无意义的启动
-                var needStartVM = false // 是否需要启动构建
                 var needUpdateContainer = false
                 var taskSeq = 0
                 // 构建机环境处理，需要先创建一个的启动构建机原子任务
@@ -809,15 +809,17 @@ class PipelineRuntimeService @Autowired constructor(
                         return@nextContainer
                     }
                 }
-                // 如果重试的插件不在当前Job内，则跳过
-                if (!retryStage && !retryStartTaskId.isNullOrBlank() && lastTimeBuildContainerRecords.isNotEmpty()) {
+                // #2375 如果重试的插件不在当前Job内，则跳过
+                if (BuildStatus.parse(container.status).isFailure() && !retryStage && !retryStartTaskId.isNullOrBlank() && lastTimeBuildContainerRecords.isNotEmpty()) {
+                    // #2375 增加判断如果当前重试的插件不是在当前失败的Job内，则跳过
                     if (null == findTaskRecord(lastTimeBuildTaskRecords = lastTimeBuildTaskRecords, container = container, retryStartTaskId = retryStartTaskId!!)) {
-                        logger.info("[$buildId|RETRY|JOB(#$containerId)(${container.name}) is not in retry range")
+                        logger.info("[$buildId|RETRY_SKIP_JOB|JOB(#$containerId)(${container.name}) is not in retry range")
                         containerSeq++
                         return@nextContainer
                     }
                 }
 
+                var startVMTaskRunCondition = RunCondition.PRE_TASK_SUCCESS
                 // --- 第3层循环：Element遍历处理 ---
                 container.elements.forEach nextElement@{ atomElement ->
                     taskSeq++ // 跳过的也要+1，Seq不需要连续性
@@ -839,6 +841,7 @@ class PipelineRuntimeService @Autowired constructor(
                     // 全新构建
                     if (lastTimeBuildTaskRecords.isEmpty()) {
                         taskCount++
+                        val additionalOptions = atomElement.additionalOptions
                         buildTaskList.add(
                             PipelineBuildTask(
                                 projectId = pipelineInfo.projectId,
@@ -855,13 +858,17 @@ class PipelineRuntimeService @Autowired constructor(
                                 taskAtom = atomElement.getTaskAtom(),
                                 status = status,
                                 taskParams = atomElement.genTaskParams(),
-                                additionalOptions = atomElement.additionalOptions,
+                                additionalOptions = additionalOptions,
                                 executeCount = 1,
                                 starter = userId,
                                 approver = null,
                                 subBuildId = null
                             )
                         )
+                        // #2375 计算启动构建机/环境的任务运行条件
+                        if (startVMTaskSeq > 0 && startVMTaskRunCondition.priority() < (additionalOptions?.runCondition?.priority() ?: -1)) {
+                            startVMTaskRunCondition = additionalOptions!!.runCondition!!
+                        }
                     } else {
                         // 如果是失败的插件重试，并且当前插件不是要重试的插件，则检查其之前的状态，如果已经执行过，则跳过
                         if (!retryStage && !retryStartTaskId.isNullOrBlank() && retryStartTaskId != atomElement.id) {
@@ -897,14 +904,10 @@ class PipelineRuntimeService @Autowired constructor(
                             needUpdateContainer = true
                         }
                     }
-
-                    // 确认是否要启动构建机/无编译环境
-                    if (!needStartVM && startVMTaskSeq > 0) {
-                        needStartVM = true
-                    }
                 }
-                // 填入: 构建机或无编译环境的环境处理，需要启动和结束构建机/环境的插件任务
-                if (needStartVM) {
+
+                // #2375 增加判断当Job内有插件任务更新，则需要启动构建机插件任务
+                if (startVMTaskSeq > 0) {
                     supplyVMTask(
                         stage = stage,
                         container = container,
@@ -917,7 +920,8 @@ class PipelineRuntimeService @Autowired constructor(
                         retryCount = retryCount,
                         buildId = buildId,
                         stageId = stageId,
-                        userId = userId
+                        userId = userId,
+                        startVMTaskRunCondition = startVMTaskRunCondition
                     )
                 }
 
@@ -1172,7 +1176,8 @@ class PipelineRuntimeService @Autowired constructor(
         retryCount: Int,
         buildId: String,
         stageId: String,
-        userId: String
+        userId: String,
+        startVMTaskRunCondition: RunCondition
     ) {
         if (startVMTaskSeq <= 0) {
             return
@@ -1188,9 +1193,9 @@ class PipelineRuntimeService @Autowired constructor(
                         buildId = buildId,
                         stageId = stageId,
                         container = container,
-                        containerSeq = containerSeq,
                         taskSeq = startVMTaskSeq,
-                        userId = userId
+                        userId = userId,
+                        startVMTaskRunCondition = startVMTaskRunCondition
                     )
                 )
                 buildTaskList.addAll(
@@ -1213,9 +1218,9 @@ class PipelineRuntimeService @Autowired constructor(
                         buildId = buildId,
                         stageId = stageId,
                         container = container,
-                        containerSeq = containerSeq,
                         taskSeq = startVMTaskSeq,
-                        userId = userId
+                        userId = userId,
+                        startVMTaskRunCondition = startVMTaskRunCondition
                     )
                 )
                 buildTaskList.addAll(
@@ -1434,7 +1439,8 @@ class PipelineRuntimeService @Autowired constructor(
         buildStatus: BuildStatus,
         errorType: ErrorType? = null,
         errorCode: Int? = null,
-        errorMsg: String? = null
+        errorMsg: String? = null,
+        needStop: Boolean = false
     ) {
         val buildTask = getBuildTask(buildId = buildId, taskId = taskId)
         if (buildTask != null) {
@@ -1458,7 +1464,7 @@ class PipelineRuntimeService @Autowired constructor(
                     stageId = buildTask.stageId,
                     containerId = buildTask.containerId,
                     containerType = buildTask.containerType,
-                    actionType = ActionType.REFRESH
+                    actionType = if (!needStop) ActionType.REFRESH else ActionType.END
                 )
             )
         }

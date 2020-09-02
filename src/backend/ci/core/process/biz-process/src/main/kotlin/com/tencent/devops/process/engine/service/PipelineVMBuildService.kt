@@ -44,6 +44,7 @@ import com.tencent.devops.common.event.dispatcher.pipeline.PipelineEventDispatch
 import com.tencent.devops.common.event.enums.ActionType
 import com.tencent.devops.common.event.pojo.measure.AtomMonitorReportBroadCastEvent
 import com.tencent.devops.common.event.pojo.pipeline.PipelineBuildStatusBroadCastEvent
+import com.tencent.devops.common.log.utils.BuildLogPrinter
 import com.tencent.devops.common.pipeline.container.NormalContainer
 import com.tencent.devops.common.pipeline.container.VMBuildContainer
 import com.tencent.devops.common.pipeline.enums.BuildStatus
@@ -51,7 +52,6 @@ import com.tencent.devops.common.pipeline.enums.BuildTaskStatus
 import com.tencent.devops.common.pipeline.pojo.element.RunCondition
 import com.tencent.devops.common.pipeline.utils.HeartBeatUtils
 import com.tencent.devops.common.redis.RedisOperation
-import com.tencent.devops.common.log.utils.BuildLogPrinter
 import com.tencent.devops.process.engine.common.Timeout
 import com.tencent.devops.process.engine.common.VMUtils
 import com.tencent.devops.process.engine.control.ControlUtils
@@ -84,6 +84,7 @@ import org.springframework.cloud.consul.discovery.ConsulDiscoveryClient
 import org.springframework.stereotype.Service
 import java.time.LocalDateTime
 import java.util.concurrent.TimeUnit
+import javax.ws.rs.BadRequestException
 import javax.ws.rs.NotFoundException
 
 @Service
@@ -154,7 +155,7 @@ class PipelineVMBuildService @Autowired(required = false) constructor(
                     // 增加判断状态，如果是已经结束的，拒绝重复启动请求
                     BuildStatus.values().forEach { s ->
                         if (BuildStatus.isFinish(s) && s.name == it.startVMStatus) {
-                            throw IllegalStateException("Deny to start VM! startVMStatus=${it.startVMStatus}")
+                            throw BadRequestException("VM status already ${it.startVMStatus}")
                         }
                     }
                     var timeoutMills: Long? = null
@@ -267,8 +268,14 @@ class PipelineVMBuildService @Autowired(required = false) constructor(
         var message: String? = null
         val actionType = if (BuildStatus.isFailure(buildStatus)) {
             message = "构建机启动失败，所有插件被终止"
+            buildVariableService.setVariable(
+                projectId = projectId, pipelineId = pipelineId, buildId = buildId, varName = VMUtils.genVMStatusFlag(vmSeqId), varValue = VMUtils.VMStatus.START_FAILED.name
+            )
             ActionType.TERMINATE
         } else {
+            buildVariableService.setVariable(
+                projectId = projectId, pipelineId = pipelineId, buildId = buildId, varName = VMUtils.genVMStatusFlag(vmSeqId), varValue = VMUtils.VMStatus.ONLINE.name
+            )
             ActionType.START
         }
 
@@ -341,11 +348,7 @@ class PipelineVMBuildService @Autowired(required = false) constructor(
                     )
                     taskBehindList.forEach { taskBehind ->
                         if (BuildStatus.isReadyToRun(taskBehind.status)) {
-                            if (taskBehind.additionalOptions != null &&
-                                taskBehind.additionalOptions!!.enable &&
-                                (taskBehind.additionalOptions!!.runCondition == RunCondition.PRE_TASK_FAILED_BUT_CANCEL ||
-                                    taskBehind.additionalOptions!!.runCondition == RunCondition.PRE_TASK_FAILED_ONLY)
-                            ) {
+                            if (taskBehind.additionalOptions != null && taskBehind.additionalOptions!!.enable && taskBehind.additionalOptions!!.runCondition?.runWhenFail() == true) {
                                 logger.info("[$buildId]|containerId=$vmSeqId|name=${taskBehind.taskName}|taskId=${taskBehind.taskId}|vm=$vmName| will run when pre task failed")
                                 continueWhenPreTaskFailed = true
                             }
@@ -365,10 +368,7 @@ class PipelineVMBuildService @Autowired(required = false) constructor(
                 BuildStatus.isReadyToRun(task.status) -> {
                     // 如果当前Container已经执行失败了，但是有配置了前置失败还要执行的插件，则只能添加这样的插件到队列中
                     if (isContainerFailed) {
-                        if (continueWhenPreTaskFailed && additionalOptions != null && additionalOptions.enable &&
-                            (additionalOptions.runCondition == RunCondition.PRE_TASK_FAILED_BUT_CANCEL ||
-                                additionalOptions.runCondition == RunCondition.PRE_TASK_FAILED_ONLY)
-                        ) {
+                        if (continueWhenPreTaskFailed && additionalOptions != null && additionalOptions.enable && additionalOptions.runCondition?.runWhenFail() == true) {
                             queueTasks.add(task)
                         }
                     } else { // 当前Container成功
@@ -433,7 +433,7 @@ class PipelineVMBuildService @Autowired(required = false) constructor(
         allVariable: Map<String, String>
     ): BuildTask? {
         logger.info("[${task.pipelineId}]|userId=$userId|Claiming task[${task.taskId}-${task.taskName}]")
-        if (task.taskId == "end-${task.taskSeq}") {
+        if (task.taskId == VMUtils.genEndPointTaskId(task.taskSeq)) { // #2375 统一处理逻辑
             pipelineRuntimeService.claimBuildTask(buildId, task, userId) // 刷新一下这个结束的任务节点时间
             // 全部完成了
             return BuildTask(buildId, vmSeqId, BuildTaskStatus.END)
@@ -608,21 +608,41 @@ class PipelineVMBuildService @Autowired(required = false) constructor(
      * 构建机结束当前Job
      */
     fun buildEndTask(buildId: String, vmSeqId: String, vmName: String): Boolean {
-
+        // #2375 移除构建机状态变量
+        val statusDelCount = buildVariableService.deleteVariable(buildId = buildId, varName = VMUtils.genVMStatusFlag(vmSeqId))
         val tasks = pipelineRuntimeService.listContainerBuildTasks(buildId, vmSeqId)
-            .filter { it.taskId == "end-${it.taskSeq}" }
+        // #2375 因为构建机网络问题，导致插件任务结束信息上报失败时，会发送结束当前构建请求, 需要对当前处于运行中的任务状态设置成取消
+        var isFail = false
+        val endBuildTask = tasks.filter {
+            if (it.taskId != VMUtils.genEndPointTaskId(it.taskSeq) && BuildStatus.isRunning(it.status)) {
+                // #2375 对于运行中的构建任务，设置为结束，因为Agent已经要退出了，并设置为失败
+                pipelineRuntimeService.updateTaskStatus(buildId = buildId, taskId = it.taskId, userId = it.starter, buildStatus = BuildStatus.CANCELED)
+                isFail = true
+            } else if (it.taskId != VMUtils.genStopVMTaskId(it.taskSeq) && BuildStatus.isReadyToRun(it.status)) {
+                // #2375 对于未执行的，设置为未执行
+                pipelineRuntimeService.updateTaskStatus(buildId = buildId, taskId = it.taskId, userId = it.starter, buildStatus = BuildStatus.UNEXEC)
+                isFail = true
+            }
+            // filter action
+            it.taskId == VMUtils.genEndPointTaskId(it.taskSeq)
+        }
 
-        if (tasks.isEmpty()) {
+        redisOperation.delete(HeartBeatUtils.genHeartBeatKey(buildId = buildId, vmSeqId = vmSeqId))
+        if (endBuildTask.isEmpty()) {
             logger.warn("[$buildId]|name=$vmName|containerId=$vmSeqId|There are no stopVM tasks!")
             return false
         }
-        if (tasks.size > 1) {
+        if (endBuildTask.size > 1) {
             logger.warn("[$buildId]|name=$vmName|containerId=$vmSeqId|There are multiple stopVM tasks!")
             return false
         }
-        redisOperation.delete(HeartBeatUtils.genHeartBeatKey(buildId, vmSeqId))
-        pipelineRuntimeService.completeClaimBuildTask(buildId, tasks[0].taskId, tasks[0].starter, BuildStatus.SUCCEED)
-        logger.info("Success to complete the build($buildId) of seq($vmSeqId)")
+        if (isFail) {
+            pipelineRuntimeService.updateTaskStatus(buildId = buildId, taskId = endBuildTask[0].taskId, userId = endBuildTask[0].starter, buildStatus = BuildStatus.CANCELED)
+        }
+        pipelineRuntimeService.completeClaimBuildTask(
+            buildId = buildId, taskId = endBuildTask[0].taskId, userId = endBuildTask[0].starter, buildStatus = BuildStatus.SUCCEED, needStop = isFail
+        )
+        logger.info("[$buildId]|BUILD_END| name=$vmName|containerId=$vmSeqId|statusDelCount=$statusDelCount")
         return true
     }
 

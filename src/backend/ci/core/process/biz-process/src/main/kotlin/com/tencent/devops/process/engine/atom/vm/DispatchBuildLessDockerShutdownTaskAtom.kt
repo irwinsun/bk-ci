@@ -34,6 +34,7 @@ import com.tencent.devops.common.pipeline.enums.BuildStatus
 import com.tencent.devops.common.pipeline.enums.EnvControlTaskType
 import com.tencent.devops.common.pipeline.pojo.element.Element
 import com.tencent.devops.common.log.utils.BuildLogPrinter
+import com.tencent.devops.common.pipeline.pojo.element.RunCondition
 import com.tencent.devops.process.engine.atom.AtomResponse
 import com.tencent.devops.process.engine.atom.AtomUtils
 import com.tencent.devops.process.engine.atom.IAtomTask
@@ -145,7 +146,7 @@ class DispatchBuildLessDockerShutdownTaskAtom @Autowired constructor(
 
             val containerId = container.id!!
             val containerType = container.getClassType()
-            val endTaskSeq = VMUtils.genVMSeq(containerSeq, taskSeq - 1)
+            val endTaskSeq = VMUtils.genVMSeq(containerSeq = containerSeq, taskSeq = taskSeq - 1)
 
             // end-1xxx 无后续任务的结束节点
             list.add(
@@ -168,7 +169,7 @@ class DispatchBuildLessDockerShutdownTaskAtom @Autowired constructor(
                     starter = userId,
                     approver = null,
                     subBuildId = null,
-                    additionalOptions = null
+                    additionalOptions = VMUtils.genVMTaskOptions(runCondition = RunCondition.PRE_TASK_FAILED_EVEN_CANCEL)
                 )
             )
 
@@ -196,7 +197,7 @@ class DispatchBuildLessDockerShutdownTaskAtom @Autowired constructor(
                     starter = userId,
                     approver = null,
                     subBuildId = null,
-                    additionalOptions = null
+                    additionalOptions = VMUtils.genVMTaskOptions(runCondition = RunCondition.PRE_TASK_FAILED_EVEN_CANCEL)
                 )
             )
 

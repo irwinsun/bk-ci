@@ -76,7 +76,8 @@ class TaskAtomService @Autowired(required = false) constructor(
             atomResponse = if (task.isSkip(runVariables)) { // 跳过
                 AtomResponse(BuildStatus.SKIP)
             } else {
-                SpringContextUtil.getBean(IAtomTask::class.java, task.taskAtom).execute(task, runVariables)
+                AtomUtils.taskAtom(task.taskAtom).execute(task, runVariables)
+//                SpringContextUtil.getBean(IAtomTask::class.java, task.taskAtom).execute(task, runVariables)
             }
         } catch (t: BuildTaskException) {
             buildLogPrinter.addRedLine(
