@@ -40,6 +40,8 @@ import com.tencent.devops.store.api.atom.ServiceMarketAtomEnvResource
 
 object AtomUtils {
 
+    const val defaultAtomStatusRefreshIntervalMills = 5000
+
     fun <T> parseAtomBeanName(task: Class<T>): String {
         val taskAtomClass = task.simpleName
         return taskAtomClass[0].toLowerCase() + taskAtomClass.substring(1)

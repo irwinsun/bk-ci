@@ -31,6 +31,7 @@ import com.tencent.devops.common.event.enums.ActionType
 import com.tencent.devops.common.pipeline.enums.BuildStatus
 import com.tencent.devops.common.redis.RedisOperation
 import com.tencent.devops.process.engine.atom.AtomResponse
+import com.tencent.devops.process.engine.atom.AtomUtils
 import com.tencent.devops.process.engine.atom.TaskAtomService
 import com.tencent.devops.process.engine.common.BS_ATOM_STATUS_REFRESH_DELAY_MILLS
 import com.tencent.devops.process.engine.common.BS_TASK_HOST
@@ -40,7 +41,6 @@ import com.tencent.devops.process.engine.service.PipelineRuntimeService
 import com.tencent.devops.process.pojo.mq.PipelineBuildContainerEvent
 import com.tencent.devops.process.service.PipelineTaskService
 import org.slf4j.LoggerFactory
-import org.springframework.amqp.rabbit.core.RabbitTemplate
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Service
 
@@ -51,7 +51,6 @@ import org.springframework.stereotype.Service
 @Service
 class TaskControl @Autowired constructor(
     private val redisOperation: RedisOperation,
-    private val rabbitTemplate: RabbitTemplate,
     private val taskAtomService: TaskAtomService,
     private val pipelineEventDispatcher: PipelineEventDispatcher,
     private val pipelineRuntimeService: PipelineRuntimeService,
@@ -79,10 +78,7 @@ class TaskControl @Autowired constructor(
 
         val buildTask = pipelineRuntimeService.getBuildTask(buildId, taskId)
         // 检查构建状态,防止重复跑
-        if (buildInfo == null || BuildStatus.isFinish(buildInfo.status) || buildTask == null || BuildStatus.isFinish(
-                buildTask.status
-            )
-        ) {
+        if (buildInfo == null || buildInfo.status.isFinish() || buildTask == null || buildTask.status.isFinish()) {
             logger.warn("[$buildId]|ATOM_$actionType|taskId=$taskId| status=${buildTask?.status ?: "not exists"}")
             return
         }
@@ -103,27 +99,27 @@ class TaskControl @Autowired constructor(
 
         logger.info("[$buildId]|[${buildInfo.status}]|ATOM_$actionType|taskId=$taskId|status=${buildTask.status}")
         val buildStatus = when {
-            BuildStatus.isReadyToRun(buildTask.status) -> { // 准备启动执行
-                if (ActionType.isEnd(actionType)) {
+            buildTask.status.isReadyToRun() -> { // 准备启动执行
+                if (actionType.needRun()) {
+                    atomBuildStatus(taskAtomService.start(buildTask))
+                } else {
                     pipelineRuntimeService.updateTaskStatus(buildId, taskId, userId, BuildStatus.SKIP)
                     BuildStatus.SKIP // 未执行的原子设置为SKIP或UNEXEC
-                } else {
-                    atomBuildStatus(taskAtomService.start(buildTask))
                 }
             }
-            BuildStatus.isRunning(buildTask.status) -> { // 运行中的，检查是否运行结束，以及决定是否强制终止
+            buildTask.status.isRunning() -> { // 运行中的，检查是否运行结束，以及决定是否强制终止
                 atomBuildStatus(taskAtomService.tryFinish(buildTask, ActionType.isTerminate(actionType)))
             }
             else -> buildTask.status // 其他状态不做动作
         }
 
-        if (BuildStatus.isRunning(buildStatus)) { // 仍然在运行中--没有结束的
+        if (buildStatus.isRunning()) { // 仍然在运行中--没有结束的
             // 如果是要轮循的才需要定时消息轮循
             val loopDelayMills =
                 if (buildTask.taskParams[BS_ATOM_STATUS_REFRESH_DELAY_MILLS] != null) {
                     buildTask.taskParams[BS_ATOM_STATUS_REFRESH_DELAY_MILLS].toString().trim().toInt()
                 } else {
-                    5000
+                    AtomUtils.defaultAtomStatusRefreshIntervalMills
                 }
             // 将执行结果参数写回事件消息中，方便再次传递
             taskParam.putAll(buildTask.taskParams)
@@ -135,7 +131,7 @@ class TaskControl @Autowired constructor(
             }
             pipelineEventDispatcher.dispatch(this)
         } else {
-            val nextActionType = if (BuildStatus.isFailure(buildStatus)) {
+            val nextActionType = if (buildStatus.isFailure()) {
                 // 如果配置了失败重试，且重试次数上线未达上限，则进行重试
                 if (pipelineTaskService.isRetryWhenFail(taskId, buildId)) {
                     logger.info("retry task [$buildId]|ATOM|stageId=$stageId|container=$containerId|taskId=$taskId |vm atom will retry, even the task is failure")

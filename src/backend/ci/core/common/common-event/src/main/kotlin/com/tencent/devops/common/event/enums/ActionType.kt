@@ -39,6 +39,11 @@ enum class ActionType {
     TERMINATE // 终止
     ;
 
+    /**
+     * 是否是需要执行的动作
+     */
+    fun needRun() = isStart(this) || REFRESH == this
+
     companion object {
         fun isStart(actionType: ActionType) = START == actionType || RETRY == actionType
         fun isEnd(actionType: ActionType) = END == actionType || isTerminate(actionType)
