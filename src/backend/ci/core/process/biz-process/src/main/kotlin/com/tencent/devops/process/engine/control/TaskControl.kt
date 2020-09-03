@@ -36,6 +36,7 @@ import com.tencent.devops.process.engine.atom.TaskAtomService
 import com.tencent.devops.process.engine.common.BS_ATOM_STATUS_REFRESH_DELAY_MILLS
 import com.tencent.devops.process.engine.common.BS_TASK_HOST
 import com.tencent.devops.process.engine.control.lock.TaskIdLock
+import com.tencent.devops.process.engine.pojo.PipelineBuildTask
 import com.tencent.devops.process.engine.pojo.event.PipelineBuildAtomTaskEvent
 import com.tencent.devops.process.engine.service.PipelineRuntimeService
 import com.tencent.devops.process.pojo.mq.PipelineBuildContainerEvent
@@ -91,8 +92,6 @@ class TaskControl @Autowired constructor(
 
         buildTask.starter = userId
 
-        var delayMillsNext = delayMills
-
         if (taskParam.isNotEmpty()) { // 追加事件传递的参数变量值
             buildTask.taskParams.putAll(taskParam)
         }
@@ -114,82 +113,77 @@ class TaskControl @Autowired constructor(
         }
 
         if (buildStatus.isRunning()) { // 仍然在运行中--没有结束的
-            // 如果是要轮循的才需要定时消息轮循
-            val loopDelayMills =
-                if (buildTask.taskParams[BS_ATOM_STATUS_REFRESH_DELAY_MILLS] != null) {
-                    buildTask.taskParams[BS_ATOM_STATUS_REFRESH_DELAY_MILLS].toString().trim().toInt()
-                } else {
-                    AtomUtils.defaultAtomStatusRefreshIntervalMills
+            loopRunning(buildTask = buildTask, buildStatus = buildStatus)
+        } else if (buildStatus.isFinish()) {
+            finishTask(buildTask, buildStatus)
+        }
+    }
+
+    private fun PipelineBuildAtomTaskEvent.finishTask(buildTask: PipelineBuildTask, buildStatus: BuildStatus) {
+        if (buildStatus.isFailure()) {
+            // #2375 对强制终止/结束动作的插件执行事件，如果插件执行结果是失败的，则忽略掉当前插件的“失败继续”、“失败重试”的设置
+            when {
+                ActionType.isEnd(actionType) -> {
+                    // 记录失败原子
+                    pipelineTaskService.createFailElementVar(buildId = buildId, projectId = projectId, pipelineId = pipelineId, taskId = taskId)
                 }
-            // 将执行结果参数写回事件消息中，方便再次传递
-            taskParam.putAll(buildTask.taskParams)
-            delayMills = loopDelayMills
-            actionType = ActionType.REFRESH // 尝试刷新任务状态
-            // 特定消费者
-            if (buildTask.taskParams[BS_TASK_HOST] != null) {
-                routeKeySuffix = buildTask.taskParams[BS_TASK_HOST].toString()
-            }
-            pipelineEventDispatcher.dispatch(this)
-        } else {
-            val nextActionType = if (buildStatus.isFailure()) {
-                // 如果配置了失败重试，且重试次数上线未达上限，则进行重试
-                if (pipelineTaskService.isRetryWhenFail(taskId, buildId)) {
+                pipelineTaskService.isRetryWhenFail(taskId, buildId) -> { // 如果配置了失败重试，且重试次数上线未达上限，则进行重试
                     logger.info("retry task [$buildId]|ATOM|stageId=$stageId|container=$containerId|taskId=$taskId |vm atom will retry, even the task is failure")
                     pipelineRuntimeService.updateTaskStatus(buildId, taskId, userId, BuildStatus.RETRY)
-                    delayMillsNext = 5000
-                    ActionType.RETRY
-                } else if (ControlUtils.continueWhenFailure(buildTask.additionalOptions)) { // 如果配置了失败继续，则继续下去
+                    delayMills = AtomUtils.defaultAtomStatusRefreshIntervalMills
+                    actionType = ActionType.RETRY
+                }
+                ControlUtils.continueWhenFailure(buildTask.additionalOptions) -> { // 如果配置了失败继续，则继续下去
                     logger.info("[$buildId]|ATOM|stageId=$stageId|container=$containerId|taskId=$taskId|vm atom will continue, even the task is failure")
                     // 记录失败原子
-                    pipelineTaskService.createFailElementVar(
-                        buildId = buildId,
-                        projectId = projectId,
-                        pipelineId = pipelineId,
-                        taskId = taskId
-                    )
-
-                    if (ActionType.isEnd(actionType)) ActionType.START
-                    else actionType
-                } else { // 如果当前动作不是结束动作并且当前状态失败了就要结束当前容器构建
-                    // 记录失败原子
-                    pipelineTaskService.createFailElementVar(
-                        buildId = buildId,
-                        projectId = projectId,
-                        pipelineId = pipelineId,
-                        taskId = taskId
-                    )
-                    if (!ActionType.isEnd(actionType)) ActionType.END
-                    else actionType // 如果是结束动作，继承它
+                    pipelineTaskService.createFailElementVar(buildId = buildId, projectId = projectId, pipelineId = pipelineId, taskId = taskId)
+                    actionType = ActionType.START
                 }
-            } else {
-                // 清除该原子内的重试记录
-                pipelineTaskService.removeRetryCache(buildId, taskId)
-                // 清理插件错误信息（重试插件成功的情况下）
-                pipelineTaskService.removeFailVarWhenSuccess(
-                    buildId = buildId,
-                    projectId = projectId,
-                    pipelineId = pipelineId,
-                    taskId = taskId
-                )
-                // 当前原子成功结束后，继续继承动作，发消息请求执行
-                actionType
+                else -> { // 如果当前动作不是结束动作并且当前状态失败了就要结束当前容器构建
+                    // 记录失败原子
+                    pipelineTaskService.createFailElementVar(buildId = buildId, projectId = projectId, pipelineId = pipelineId, taskId = taskId)
+                    actionType = ActionType.END
+                }
             }
-
-            pipelineEventDispatcher.dispatch(
-                PipelineBuildContainerEvent(
-                    source = "taskControl_$buildStatus",
-                    projectId = projectId,
-                    pipelineId = pipelineId,
-                    userId = userId,
-                    buildId = buildId,
-                    stageId = stageId,
-                    containerId = containerId,
-                    containerType = containerType,
-                    actionType = nextActionType,
-                    delayMills = delayMillsNext
-                )
-            )
+        } else {
+            // 清除该原子内的重试记录
+            pipelineTaskService.removeRetryCache(buildId = buildId, taskId = taskId)
+            // 清理插件错误信息（重试插件成功的情况下）
+            pipelineTaskService.removeFailVarWhenSuccess(buildId = buildId, projectId = projectId, pipelineId = pipelineId, taskId = taskId)
         }
+        pipelineEventDispatcher.dispatch(
+            PipelineBuildContainerEvent(
+                source = "taskControl_$buildStatus",
+                projectId = projectId,
+                pipelineId = pipelineId,
+                userId = userId,
+                buildId = buildId,
+                stageId = stageId,
+                containerId = containerId,
+                containerType = containerType,
+                actionType = actionType,
+                delayMills = delayMills
+            )
+        )
+    }
+
+    private fun PipelineBuildAtomTaskEvent.loopRunning(buildTask: PipelineBuildTask, buildStatus: BuildStatus) {
+        // 如果是要轮循的才需要定时消息轮循
+        delayMills =
+            if (buildTask.taskParams[BS_ATOM_STATUS_REFRESH_DELAY_MILLS] != null) {
+                buildTask.taskParams[BS_ATOM_STATUS_REFRESH_DELAY_MILLS].toString().trim().toInt()
+            } else {
+                AtomUtils.defaultAtomStatusRefreshIntervalMills
+            }
+        // 将执行结果参数写回事件消息中，方便再次传递
+        taskParam.putAll(buildTask.taskParams)
+        actionType = ActionType.REFRESH // 尝试刷新任务状态
+        // 特定消费者
+        if (buildTask.taskParams[BS_TASK_HOST] != null) {
+            routeKeySuffix = buildTask.taskParams[BS_TASK_HOST].toString()
+        }
+
+        pipelineEventDispatcher.dispatch(this.copy(source = "taskControl_$buildStatus"))
     }
 
     private fun atomBuildStatus(response: AtomResponse): BuildStatus {

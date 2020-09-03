@@ -149,7 +149,7 @@ interface IAtomTask<T> {
                     errorMsg = task.errorMsg
                 )
             } else { // 强制终止的设置为失败
-                defaultFailAtomResponse
+                defaultTerminateAtomResponse
             }
         } else {
             AtomResponse(
@@ -188,4 +188,11 @@ val defaultFailAtomResponse = AtomResponse(
     errorType = ErrorType.USER,
     errorCode = ErrorCode.USER_DEFAULT_ERROR,
     errorMsg = "not definded error"
+)
+
+val defaultTerminateAtomResponse = AtomResponse(
+    buildStatus = BuildStatus.TERMINATE,
+    errorType = ErrorType.USER,
+    errorCode = ErrorCode.USER_DEFAULT_ERROR,
+    errorMsg = "terminate"
 )
