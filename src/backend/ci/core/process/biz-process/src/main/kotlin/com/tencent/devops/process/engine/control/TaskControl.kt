@@ -101,9 +101,9 @@ class TaskControl @Autowired constructor(
             buildTask.status.isReadyToRun() -> { // 准备启动执行
                 if (actionType.needRun()) {
                     atomBuildStatus(taskAtomService.start(buildTask))
-                } else {
-                    pipelineRuntimeService.updateTaskStatus(buildId, taskId, userId, BuildStatus.SKIP)
-                    BuildStatus.SKIP // 未执行的原子设置为SKIP或UNEXEC
+                } else {// #2400 因任务终止&结束的事件命令而未执行的原子设置为UNEXEC，而不是SKIP
+                    pipelineRuntimeService.updateTaskStatus(buildId, taskId, userId, BuildStatus.UNEXEC)
+                    BuildStatus.UNEXEC // SKIP 仅当是用户意愿明确正常运行情况要跳过执行的，不影响主流程的才能是SKIP
                 }
             }
             buildTask.status.isRunning() -> { // 运行中的，检查是否运行结束，以及决定是否强制终止
