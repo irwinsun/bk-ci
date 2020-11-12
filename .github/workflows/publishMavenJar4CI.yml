@@ -54,7 +54,10 @@ jobs:
           build_mavenRepoUsername: ${{ secrets.SONATYPE_USERNAME }}
           build_mavenRepoPassword: ${{ secrets.SONATYPE_PASSWORD }}
         run: |
-          ./gradlew :core:common:common-api:publish \
+          echo "GITHUB_REF=${GITHUB_REF}"
+          ci_version=${GITHUB_REF##*/}
+          echo "ci_version=${ci_version#v}"
+          ./gradlew :core:common:common-api:publish -Dci_version=${ci_version#v}\
           -Psigning.keyId=${{ secrets.SIGNING_KEY_ID }} \
           -Psigning.password='${{ secrets.SIGNING_PASSWORD }}' \
           -Psigning.secretKeyRingFile=${{ github.workspace }}/secretKeyRingFile.gpg \
