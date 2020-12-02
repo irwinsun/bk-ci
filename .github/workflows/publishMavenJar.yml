@@ -1,11 +1,12 @@
 # This workflow will build a Java project with Maven
 # For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-maven
 
-name: deploy maven snapshot jar to packages
+name: deploy CI jar to OSS
 
 on:
   push:
-    branches: [ release-disable ]
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -24,9 +25,45 @@ jobs:
         uses: actions/setup-java@v1
         with:
           java-version: 1.8
-      - name: Gradle Build
-        uses: eskatos/gradle-command-action@v1
+      - name: Cache Gradle packages
+        uses: actions/cache@v2
         with:
-          gradle-version: 4.8.1
-          build-root-directory: src/backend/ci
-          arguments: test uploadArchives -DmavenRepoUsername=${{ github.actor }} -DmavenRepoPassword=${{ secrets.GITHUB_TOKEN }} -DmavenRepoUrl="http://maven.aliyun.com/nexus/content/groups/public/" -DmavenRepoDeployUrl="https://maven.pkg.github.com/Tencent/bk-ci"
+          path: ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
+          restore-keys: ${{ runner.os }}-gradle
+      - name: Set up GPG
+        run: |
+          echo ${{ github.workspace }}
+          # gpg init
+          mkdir ~/.gnupg && echo use-agent >> ~/.gnupg/gpg.conf
+          echo pinentry-mode loopback >> ~/.gnupg/gpg.conf
+          echo allow-loopback-pinentry >> ~/.gnupg/gpg-agent.conf
+          echo RELOADAGENT | gpg-connect-agent
+          echo ${SIGNING_KEY} | awk '{gsub(/\\n/,"\n")}1'| gpg --dearmor > ${{ github.workspace }}/secretKeyRingFile.gpg
+          gpg --import  --pinentry-mode loopback --batch --passphrase '${SIGNING_PASSWORD}' ${{ github.workspace }}/secretKeyRingFile.gpg
+          ls -al ${{ github.workspace }}
+          ls -al ~/.gnupg/
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        working-directory:
+      - name: Gradle Build
+        working-directory: src/backend/ci
+        env:
+          build_mavenRepoDeployUrl: "https://oss.sonatype.org/service/local/staging/deploy/maven2/"
+          build_mavenRepoUsername: ${{ secrets.SONATYPE_USERNAME }}
+          build_mavenRepoPassword: ${{ secrets.SONATYPE_PASSWORD }}
+        run: |
+          echo "GITHUB_REF=${GITHUB_REF}"
+          ci_version=${GITHUB_REF##*/v}
+          echo "ci_version=${ci_version}"
+          ./gradlew publish -Dci_version=${ci_version} \
+          -Psigning.keyId=${{ secrets.SIGNING_KEY_ID }} \
+          -Psigning.password='${{ secrets.SIGNING_PASSWORD }}' \
+          -Psigning.secretKeyRingFile=${{ github.workspace }}/secretKeyRingFile.gpg \
+          -DmavenRepoUrl="http://maven.aliyun.com/nexus/content/groups/public/"
+      - name: Clean Up
+        if: ${{ always() }}
+        working-directory:
+        run: |
+          rm -rf ~/.gnupg
