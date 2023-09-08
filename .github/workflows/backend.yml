@@ -53,8 +53,9 @@ jobs:
     - name: Gradle Build Backend Service
       working-directory: src/backend/ci
       run: |
-        ./gradlew clean test build :core:worker:worker-agent:shadowJar \
+        ./gradlew clean test generateLicenseReport build :core:worker:worker-agent:shadowJar \
         -DmysqlURL=127.0.0.1:${{ job.services.mysql.ports['3306'] }} -DmysqlUser=root -DmysqlPasswd=root --no-daemon
+        cp -f build/reports/dependency-license/THIRD-PARTY-NOTICES.txt release/THIRD-PARTY-NOTICES.txt
     - uses: actions/upload-artifact@v1
       if: ${{ inputs.upload == 'true'  }}
       with:
@@ -93,8 +94,9 @@ jobs:
     - name: Gradle Build Backend Service
       working-directory: src/backend/ci
       run: |
-        ./gradlew clean test build :core:worker:worker-agent:shadowJar -Ddevops.assemblyMode=KUBERNETES \
+        ./gradlew clean test generateLicenseReport build :core:worker:worker-agent:shadowJar -Ddevops.assemblyMode=KUBERNETES \
         -DmysqlURL=127.0.0.1:${{ job.services.mysql.ports['3306'] }} -DmysqlUser=root -DmysqlPasswd=root --no-daemon
+        cp -f build/reports/dependency-license/THIRD-PARTY-NOTICES.txt release/THIRD-PARTY-NOTICES.txt
     - uses: actions/upload-artifact@v1
       if: ${{ inputs.upload == 'true'  }}
       with:

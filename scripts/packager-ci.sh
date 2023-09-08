@@ -83,6 +83,12 @@ prepare_agentless (){
   cp -r "$ci_pkg_dir/dockerhost" "$ci_pkg_dir/agentless"
 }
 
+copy_license_files () {
+  echo "copy license files: $ci_code_dir/LICENSE.txt to $ci_code_dir/LICENSE.txt"
+  cp -f "$ci_code_dir/LICENSE.txt" "$ci_pkg_dir/LICENSE.txt"
+  cp -f "$ci_bin_msjar_dir/THIRD-PARTY-NOTICES.txt" "$ci_pkg_dir/THIRD-PARTY-NOTICES.txt"
+}
+
 packager_ci (){
   mkdir -p "$ci_pkg_dir"
   echo "ci_code_dir is $ci_code_dir."
@@ -95,6 +101,7 @@ packager_ci (){
   collect_backend
   collect_frontend
   prepare_agentless
+  copy_license_files
   echo "gen version:"
   echo "$VERSION" | tee "$ci_pkg_dir/VERSION"
   echo "BK_CI_VERSION=\"$VERSION\"" | tee -a "$ci_pkg_dir/scripts/bkenv.properties"

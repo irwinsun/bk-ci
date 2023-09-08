@@ -23,4 +23,5 @@ dependencies {
     implementation("org.owasp:dependency-check-gradle:7.1.0.1")
     implementation("com.google.cloud.tools:jib-gradle-plugin:3.3.1")
     implementation("com.namics.oss.gradle.license:license-enforce-plugin:1.6.3")  // 1.7.0+ need gradle-8.0
+    implementation("com.github.jk1:gradle-license-report:1.17") // 2.x need gradle-7.0
 }

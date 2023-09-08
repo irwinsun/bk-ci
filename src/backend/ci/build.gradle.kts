@@ -2,6 +2,7 @@ plugins {
     id("com.tencent.devops.boot") version "0.0.7"
     detektCheck
     `task-enforce-licenses`
+    `task-license-report`
 }
 
 apply(plugin = "org.owasp.dependencycheck")
