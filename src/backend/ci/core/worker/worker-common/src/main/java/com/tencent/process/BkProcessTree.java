@@ -47,12 +47,15 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.Map.Entry;
 import org.apache.commons.io.FileUtils;
@@ -157,7 +160,7 @@ public abstract class BkProcessTree implements Iterable<BkProcessTree.OSProcess>
                     proc.destroy();
                 }
 
-                public void kill(boolean forceFlag) throws InterruptedException {
+                public void kill0(boolean forceFlag) throws InterruptedException {
                     proc.destroy();
                     this.killByKiller();
                 }
@@ -619,7 +622,7 @@ public abstract class BkProcessTree implements Iterable<BkProcessTree.OSProcess>
             return new File(new File("/proc/" + this.getPid()), relativePath);
         }
 
-        public void kill(boolean forceFlag) throws InterruptedException {
+        public void kill0(boolean forceFlag) throws InterruptedException {
             try {
                 int pid = this.getPid();
                 BkProcessTree.log("Killing pid=" + pid);
@@ -728,7 +731,7 @@ public abstract class BkProcessTree implements Iterable<BkProcessTree.OSProcess>
                             this.killByKiller();
                         }
 
-                        public void kill(boolean forceFlag) throws InterruptedException {
+                        public void kill0(boolean forceFlag) throws InterruptedException {
                             BkProcessTree.log("Killing " + this.getPid());
                             p.kill();
                             this.killByKiller();
@@ -815,6 +818,9 @@ public abstract class BkProcessTree implements Iterable<BkProcessTree.OSProcess>
     }
 
     public abstract class OSProcess implements IOSProcess, Serializable {
+
+        private Set<Integer> keepAlivePids = new HashSet<Integer>(64);
+
         final int pid;
 
         private OSProcess(int pid) {
@@ -823,6 +829,10 @@ public abstract class BkProcessTree implements Iterable<BkProcessTree.OSProcess>
 
         public final int getPid() {
             return this.pid;
+        }
+
+        public final void addKeepAlivePids(Collection<Integer> pids) {
+            keepAlivePids.addAll(pids);
         }
 
         public abstract BkProcessTree.OSProcess getParent();
@@ -836,6 +846,7 @@ public abstract class BkProcessTree implements Iterable<BkProcessTree.OSProcess>
 
             for (OSProcess p : BkProcessTree.this) {
                 if (p.getParent() == this) {
+                    p.addKeepAlivePids(keepAlivePids);
                     r.add(p);
                 }
             }
@@ -843,7 +854,14 @@ public abstract class BkProcessTree implements Iterable<BkProcessTree.OSProcess>
             return r;
         }
 
-        public abstract void kill(boolean forceFlag) throws InterruptedException;
+        public void kill(boolean forceFlag) throws InterruptedException {
+            BkProcessTree.log("pid=" + pid + ", iskeepAlive=" + keepAlivePids.contains(pid));
+            if (!keepAlivePids.contains(pid)) {
+                kill0(forceFlag);
+            }
+        }
+
+        public abstract void kill0(boolean forceFlag) throws InterruptedException;
 
         void killByKiller() throws InterruptedException {
 
