@@ -32,6 +32,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: init mysql
       run: |
+        echo "hello sql"
         export MYSQL_PWD=root
         runsql() {
           sql_file=$1
