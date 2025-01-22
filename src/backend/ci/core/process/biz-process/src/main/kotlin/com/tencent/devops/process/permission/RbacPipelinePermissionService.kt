@@ -39,11 +39,10 @@ import com.tencent.devops.common.auth.api.pojo.BkAuthGroup
 import com.tencent.devops.common.auth.code.PipelineAuthServiceCode
 import com.tencent.devops.common.client.Client
 import com.tencent.devops.process.engine.dao.PipelineInfoDao
+import com.tencent.devops.process.service.ProjectCacheService
 import com.tencent.devops.process.service.view.PipelineViewGroupCommonService
-import com.tencent.devops.project.api.service.ServiceProjectResource
 import org.jooq.DSLContext
 import org.slf4j.LoggerFactory
-import javax.ws.rs.NotFoundException
 
 @Suppress("LongParameterList")
 class RbacPipelinePermissionService(
@@ -54,7 +53,8 @@ class RbacPipelinePermissionService(
     val pipelineInfoDao: PipelineInfoDao,
     val pipelineViewGroupCommonService: PipelineViewGroupCommonService,
     val authResourceApi: AuthResourceApi,
-    val client: Client
+    val client: Client,
+    val projectCacheService: ProjectCacheService
 ) : PipelinePermissionService {
 
     override fun checkPipelinePermission(
@@ -186,43 +186,19 @@ class RbacPipelinePermissionService(
         }
     }
 
-    override fun getResourceByPermission(userId: String, projectId: String, permission: AuthPermission): List<String> {
-        logger.info("[rbac] get resource by permission|$userId|$projectId|$permission")
-        val startEpoch = System.currentTimeMillis()
-        try {
-            // 获取有权限的流水线、流水线组、项目列表
-            val instanceMap = authPermissionApi.getUserResourceAndParentByPermission(
-                user = userId,
-                serviceCode = pipelineAuthServiceCode,
-                projectCode = projectId,
-                permission = permission,
-                resourceType = resourceType
-            )
-            return when {
-                // 如果有项目下所有该资源权限,返回项目下流水线列表
-                instanceMap[AuthResourceType.PROJECT.value]?.contains(projectId) == true ->
-                    getAllAuthPipelineIds(projectId = projectId)
-
-                else -> {
-                    // 获取有权限流水线组下的流水线
-                    val authViewPipelineIds = instanceMap[AuthResourceType.PIPELINE_GROUP.value]?.let { authViewIds ->
-                        pipelineViewGroupCommonService.listPipelineIdsByViewIds(projectId, authViewIds)
-                    } ?: emptyList()
-                    // 获取有权限的流水线列表
-                    val authPipelineIds = instanceMap[AuthResourceType.PIPELINE_DEFAULT.value] ?: emptyList()
-
-                    val pipelineIds = mutableSetOf<String>()
-                    pipelineIds.addAll(authViewPipelineIds)
-                    pipelineIds.addAll(authPipelineIds)
-                    pipelineIds.toList()
-                }
-            }
-        } finally {
-            logger.info(
-                "It take(${System.currentTimeMillis() - startEpoch})ms to get resource by permission|" +
-                    "$userId|$projectId|$permission"
-            )
-        }
+    override fun getResourceByPermission(
+        userId: String,
+        projectId: String,
+        permission: AuthPermission
+    ): List<String> {
+        return authPermissionApi.getUserResourceByPermission(
+            user = userId,
+            serviceCode = pipelineAuthServiceCode,
+            resourceType = resourceType,
+            projectCode = projectId,
+            permission = permission,
+            supplier = null
+        )
     }
 
     override fun filterPipelines(
@@ -301,8 +277,7 @@ class RbacPipelinePermissionService(
     }
 
     override fun isControlPipelineListPermission(projectId: String): Boolean {
-        val projectInfo = client.get(ServiceProjectResource::class).get(englishName = projectId).data
-            ?: throw NotFoundException("Fail to find the project info of project($projectId)")
+        val projectInfo = projectCacheService.getProject(projectId) ?: return false
         return projectInfo.properties?.pipelineListPermissionControl == true
     }
 
