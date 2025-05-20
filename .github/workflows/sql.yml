@@ -33,4 +33,5 @@ jobs:
     - name: init mysql
       run: |
         echo "abc"
+        echo "hello"
       working-directory: support-files/sql
