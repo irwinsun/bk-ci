@@ -32,6 +32,5 @@ jobs:
     - uses: actions/checkout@v2
     - name: init mysql
       run: |
-        export MYSQL_PWD=root
-        echo $MYSQL_PWD
+        echo "abc"
       working-directory: support-files/sql
