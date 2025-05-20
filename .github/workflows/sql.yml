@@ -9,6 +9,7 @@ on:
     branches: [ master, release-*, test* ]
     paths:
     - 'support-files/sql/**'
+    - '.github/**'
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -32,6 +33,6 @@ jobs:
     - uses: actions/checkout@v2
     - name: init mysql
       run: |
-        pwd;
+        echo "abc"
         echo "hello"
       working-directory: support-files/sql
