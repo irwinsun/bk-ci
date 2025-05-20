@@ -1,12 +1,9 @@
 USE devops_ci_dispatch;
 
 SET NAMES utf8mb4;
+
 SET FOREIGN_KEY_CHECKS = 0;
 
-
--- ----------------------------
--- Table structure for T_DISPATCH_PIPELINE_BUILD
--- ----------------------------
 
 CREATE TABLE IF NOT EXISTS `T_DISPATCH_PIPELINE_BUILD` (
   `ID` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
