@@ -81,7 +81,7 @@
         TriggerEvent,
         DelegationPermission
     } from '@/components/PipelineDetailTabs'
-    import { AuthorityTab, ShowVariable } from '@/components/PipelineEditTabs/'
+    import { ShowVariable } from '@/components/PipelineEditTabs/'
     import { mapActions, mapGetters, mapState } from 'vuex'
 
     export default {
@@ -89,11 +89,15 @@
             BuildHistoryTab,
             TriggerEvent,
             PipelineConfig,
-            AuthorityTab,
             ChangeLog,
             Logo,
             ShowVariable,
             DelegationPermission
+        },
+        data () {
+            return {
+                shouldRetainArchiveFlag: false
+            }
         },
         computed: {
             ...mapState('atom', ['pipelineInfo', 'pipeline', 'pipelineSetting', 'activePipelineVersion', 'switchingVersion']),
@@ -103,6 +107,9 @@
             },
             activeChild () {
                 return this.getNavComponent(this.activeMenuItem)
+            },
+            archiveFlag () {
+                return this.$route.query.archiveFlag
             },
             asideNav () {
                 return [
@@ -131,7 +138,7 @@
                             //     title: this.$t('details.outputs'),
                             //     name: 'artifactory'
                             // }
-                        ].map((child) => ({
+                        ].filter((child) => child.name !== 'triggerEvent' || !this.archiveFlag).map((child) => ({
                             ...child,
                             disabled: !this.isReleaseVersion && !this.isBranchVersion,
                             active: this.activeMenuItem === child.name
@@ -168,15 +175,6 @@
                         title: this.$t('more'),
                         children: [
                             {
-                                title: this.$t('authSetting'),
-                                disableTooltip: {
-                                    content: this.$refs.disableToolTips?.[2],
-                                    disabled: this.isReleaseVersion,
-                                    delay: [300, 0]
-                                },
-                                name: 'permission'
-                            },
-                            {
                                 title: this.$t('delegationPermission'),
                                 name: 'delegation'
                             },
@@ -189,7 +187,7 @@
                                 },
                                 name: 'changeLog'
                             }
-                        ].map((child) => ({
+                        ].filter(child => !this.archiveFlag || child.name === 'changeLog').map((child) => ({
                             ...child,
                             disabled: !this.isReleaseVersion,
                             active: this.activeMenuItem === child.name
@@ -202,9 +200,15 @@
             }
         },
         beforeDestroy () {
-            this.resetHistoryFilterCondition()
+            this.resetHistoryFilterCondition({ retainArchiveFlag: this.shouldRetainArchiveFlag })
             this.selectPipelineVersion(null)
             this.resetAtomModalMap()
+        },
+        beforeRouteLeave (to, from, next) {
+            // 判断目标路由是否需要保留 archiveFlag
+            const routesToKeepArchiveFlag = ['pipelinesDetail', 'draftDebugRecord']
+            this.shouldRetainArchiveFlag = routesToKeepArchiveFlag.includes(to.name) && to.query.archiveFlag !== undefined
+            next()
         },
         methods: {
             ...mapActions('pipelines', ['resetHistoryFilterCondition']),
@@ -229,10 +233,6 @@
                         return {
                             component: 'PipelineConfig',
                             showVar: type === 'pipeline'
-                        }
-                    case 'permission':
-                        return {
-                            component: 'AuthorityTab'
                         }
                     case 'versionHistory':
                         return {
@@ -263,7 +263,8 @@
                     params: {
                         ...this.$route.params,
                         type: child.name
-                    }
+                    },
+                    query: this.$route.query
                 })
             },
             switchToReleaseVersion () {
@@ -271,7 +272,8 @@
                     params: {
                         ...this.$route.params,
                         version: this.pipelineInfo?.releaseVersion
-                    }
+                    },
+                    query: this.$route.query
                 })
             }
         }
